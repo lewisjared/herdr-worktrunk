@@ -26,7 +26,7 @@ command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/open.sh\" picker-with-r
 
 [[actions]]
 id = "remove"
-title = "Worktree: remove"
+title = "Worktree: clean up"
 contexts = ["workspace"]
 command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/open.sh\" remover"]
 
@@ -64,7 +64,7 @@ command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/picker.sh\" --show-with
 
 [[panes]]
 id = "remover"
-title = "Worktrunk — remove"
+title = "Worktrunk — clean up"
 placement = "split"
 command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/remove.sh\""]
 

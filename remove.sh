@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Remover for the worktrunk herdr plugin — fzf over removable worktrees, then
-# `wt remove`. Plain bash, shell-agnostic: it calls the `wt` binary directly, so it
-# needs no shell-function/rc integration.
+# Clean-up for the worktrunk herdr plugin: multi-select removable worktrees, then
+# `wt remove` each one. Plain bash, shell-agnostic: it calls the `wt` binary directly,
+# so it needs no shell-function/rc integration.
 
 if ! command -v fzf >/dev/null; then
   printf '\033[31m%s\033[0m\n' "fzf not found on PATH"; sleep 2; exit 1
@@ -19,29 +19,63 @@ worktrunk_fzf_layout
 
 wtitems=$(worktrunk_worktree_items) || exit 1
 
-cands=$(printf '%s\n' "$wtitems" | worktrunk_worktree_branches)
+# One "branch<TAB>path" line per removable worktree. The path is the identity, so
+# detached worktrees and duplicate branch names stay unambiguous.
+cands=$(printf '%s\n' "$wtitems" \
+  | jq -r 'select(.kind == "worktree" and .path != null and .is_main != true)
+      | [(.branch // "(detached)"), .path] | @tsv')
 if [[ -z $cands ]]; then
   printf '\033[33m%s\033[0m\n' "No removable worktrees (only the main worktree exists)."; sleep 2; exit 0
 fi
 
-name=$(printf '%s\n' "$cands" \
-  | worktrunk_pick_branch 'remove worktree ❯ ' \
-      '↵ to remove (worktrunk will ask to confirm) · esc to cancel')
-[[ -z $name ]] && exit 0      # esc / no selection → cancel
+selected=$(printf '%s\n' "$cands" \
+  | worktrunk_pick_branch 'clean worktrees ❯ ' \
+      'tab to select · ↵ removes them (worktrunk will ask to confirm) · esc to cancel' \
+      --multi --delimiter=$'\t' --with-nth=1)
+[[ -z $selected ]] && exit 0      # esc / no selection → cancel
 
-# Path and native herdr workspace (if open) of the worktree we're about to remove.
-wtpath=$(printf '%s\n' "$wtitems" | worktrunk_worktree_path "$name")
-wsid=$(worktrunk_open_workspace_id "$wtpath")
+names=() paths=() wsids=()
+while IFS=$'\t' read -r name wtpath; do
+  [[ -z $wtpath ]] && continue
+  names+=("$name")
+  paths+=("$wtpath")
+  # Resolve every workspace up front: herdr forgets the mapping with the worktree,
+  # and the pane's own cwd may be one of the worktrees about to go.
+  wsids+=("$(worktrunk_open_workspace_id "$wtpath")")
+done <<<"$selected"
+
 mainpath=$(printf '%s\n' "$wtitems" | worktrunk_main_worktree_path)
 
 # wt remove prompts for approval itself, refuses unmerged branches without -D, and
-# refuses worktrees with untracked files without -f — so run it interactively and let
-# worktrunk gate the destructive bits. --foreground keeps the pane until it's done.
-# -C runs it from the main worktree (see worktrunk_main_worktree_path).
-if ! wt remove --foreground -C "$mainpath" "$name"; then
-  printf '\n\033[31m%s\033[0m press any key to close' "wt remove failed (see above)."; read -n1
-  exit 0
+# refuses worktrees with untracked files without -f, so let worktrunk gate each one.
+# --foreground keeps the pane until it's done. -C runs it from the main worktree.
+removed=() failed=()
+for i in "${!paths[@]}"; do
+  if wt remove --foreground -C "$mainpath" "${paths[$i]}"; then
+    removed+=("$i")
+  else
+    failed+=("${names[$i]}")
+  fi
+done
+
+if ((${#failed[@]})); then
+  printf '\n\033[31m%s\033[0m\n' "wt remove failed (see above). Kept:"
+  printf '  %s\n' "${failed[@]}"
+  printf 'press any key to close'; read -r -n1
+elif ((${#removed[@]})); then
+  worktrunk_hold_pane remove "removed ${names[*]}."
 fi
 
-worktrunk_hold_pane remove "removed $name."
-worktrunk_close_worktree_ui "$wsid" "$wtpath"
+# Close workspaces only after every removal has run, and the picker's own workspace
+# last: closing it earlier would kill the batch halfway through.
+close_current=false
+for i in "${removed[@]}"; do
+  if [[ -n ${wsids[$i]} && ${wsids[$i]} == "${HERDR_WORKSPACE_ID:-}" ]]; then
+    close_current=true
+  else
+    worktrunk_close_worktree_ui "${wsids[$i]}" "${paths[$i]}"
+  fi
+done
+if [[ $close_current == true ]]; then
+  worktrunk_close_worktree_ui "$HERDR_WORKSPACE_ID" ""
+fi

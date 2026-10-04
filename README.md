@@ -43,11 +43,12 @@ The pickers support [worktrunk syntax for PR/MR along with other shortcuts](http
 Worktrunk's lifecycle hooks run in either presentation mode, and the checkout
 opens as a tab or a native worktree workspace according to plugin configuration.
 
-- **Worktree: remove** — opens an fzf picker over removable worktrees
-  (everything except the main checkout). Pick one; worktrunk prompts for
-  confirmation and gates unmerged branches / untracked files itself, then
-  removes it. The native workspace or any legacy tab panes associated with the
-  deleted worktree are closed automatically.
+- **Worktree: clean up** — opens a multi-select fzf picker over removable
+  worktrees (everything except the main checkout). Mark worktrees with `Tab`,
+  then press `Enter`. Worktrunk prompts for confirmation and gates unmerged
+  branches / untracked files for each one. A worktree it refuses stays open.
+  Once every removal has run, the native workspaces or legacy tab panes of the
+  deleted worktrees are closed automatically.
 
 - **Worktree: merge into the target branch** — the same picker over removable
   worktrees, then `wt merge` on the one you pick, then removal. The native
@@ -244,7 +245,7 @@ herdr plugin action invoke open-current --plugin worktrunk
 herdr plugin action invoke open-with-remotes --plugin worktrunk
 ```
 
-### Remove Worktree
+### Clean up worktrees
 
 ```
 herdr plugin action invoke remove --plugin worktrunk
@@ -284,7 +285,7 @@ description = "Worktree: switch / create from local or remote branches"
 key = "prefix+shift+d"
 type = "plugin_action"
 command = "worktrunk.remove"
-description = "Worktree: remove"
+description = "Worktree: clean up"
 
 [[keys.command]]
 key = "prefix+shift+m"
@@ -327,7 +328,7 @@ The plugin is a manifest plus small bash scripts:
 - `tests/merge_test.sh` — merge argument and failure-path checks
 - `tests/open_test.sh` — picker placement / open argument checks
 - `tests/picker_test.sh` — switch / create picker checks in both open modes
-- `tests/remove_test.sh` — remove argument, failure-path and hold checks
+- `tests/remove_test.sh` — batch removal, failure-path and hold checks
 - `tests/tab_relabel_test.sh` — tab relabel checks
 
 herdr caches the manifest when a plugin is linked, so after editing

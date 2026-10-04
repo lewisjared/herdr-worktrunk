@@ -55,11 +55,11 @@ worktrunk_open_workspace_id() {
 }
 
 # fzf over the branches on stdin with PROMPT and HEADER, in the chrome that suits
-# the picker placement. Prints nothing when the user cancels. Call
-# worktrunk_fzf_layout first.
+# the picker placement. Extra arguments go to fzf. Prints nothing when the user
+# cancels. Call worktrunk_fzf_layout first.
 worktrunk_pick_branch() {
   fzf --reverse --info=inline "${WORKTRUNK_FZF_LAYOUT[@]}" \
-      --prompt="$1" --header="$2"
+      --prompt="$1" --header="$2" "${@:3}"
 }
 
 # Close the herdr UI a destroyed worktree left behind: its native workspace as a

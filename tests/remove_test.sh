@@ -9,8 +9,8 @@ trap 'rm -rf "$stub_dir"' EXIT
 config_dir="$stub_dir/config"
 mkdir -p "$config_dir"
 
-# Stand in for `wt`: list answers with one removable worktree, and remove records
-# its argv and fails when the test asks it to.
+# Stand in for `wt`: list answers with two removable worktrees, and remove records
+# its argv and fails for every path, or just WT_STUB_FAIL_PATH, when asked to.
 cat > "$stub_dir/wt" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$WT_STUB_LOG"
@@ -18,25 +18,30 @@ case "$1" in
   list)
     printf '%s' '[
       {"branch":"main","kind":"worktree","path":"/repo","is_main":true},
-      {"branch":"feature","kind":"worktree","path":"/repo.feature","is_main":false}
+      {"branch":"feature","kind":"worktree","path":"/repo.feature","is_main":false},
+      {"branch":"other","kind":"worktree","path":"/repo.other","is_main":false}
     ]'
     ;;
-  remove) exit "${WT_STUB_REMOVE_STATUS:-0}" ;;
+  remove)
+    [[ ${!#} == "${WT_STUB_FAIL_PATH-}" ]] && exit 1
+    exit "${WT_STUB_REMOVE_STATUS:-0}"
+    ;;
 esac
 EOF
 
-# fzf picks the only candidate; the picker's stdin has to be drained either way.
+# fzf picks the feature worktree unless told otherwise; the picker's stdin has to
+# be drained either way.
 cat > "$stub_dir/fzf" <<'EOF'
 #!/usr/bin/env bash
 cat >/dev/null
-printf '%s\n' "${FZF_STUB_PICK-feature}"
+printf '%s\n' "${FZF_STUB_PICK-$'feature\t/repo.feature'}"
 EOF
 
 cat > "$stub_dir/herdr" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
   "worktree list")
-    printf '%s' '{"result":{"worktrees":[{"path":"/repo.feature","open_workspace_id":"ws-feature"}]}}'
+    printf '%s' '{"result":{"worktrees":[{"path":"/repo.feature","open_workspace_id":"ws-feature"},{"path":"/repo.other","open_workspace_id":"ws-other"}]}}'
     ;;
   *) printf '%s\n' "$*" | tee -a "$HERDR_STUB_LOG" ;;
 esac
@@ -100,7 +105,7 @@ refute_pane() {
 # warn about. Close without waiting.
 : > "$config_dir/config.toml"
 run_remove
-assert_log wt 'remove --foreground -C /repo feature' "$WT_STUB_LOG"
+assert_log wt 'remove --foreground -C /repo /repo.feature' "$WT_STUB_LOG"
 assert_log herdr 'workspace close ws-feature' "$HERDR_STUB_LOG"
 refute_pane 'press any key to continue'
 
@@ -137,5 +142,19 @@ WT_STUB_REMOVE_STATUS=1 run_remove
 assert_pane 'wt remove failed \(see above\)\.'
 refute_pane 'removed feature'
 refute_log herdr 'workspace close' "$HERDR_STUB_LOG"
+
+# A batch removes every pick before closing anything, and closes the picker's own
+# workspace last so the batch can't be cut short.
+: > "$config_dir/config.toml"
+both=$'feature\t/repo.feature\nother\t/repo.other'
+FZF_STUB_PICK=$both HERDR_WORKSPACE_ID=ws-feature run_remove
+[[ $(grep '^remove' "$WT_STUB_LOG") == $'remove --foreground -C /repo /repo.feature\nremove --foreground -C /repo /repo.other' ]]
+[[ $(cat "$HERDR_STUB_LOG") == $'workspace close ws-other\nworkspace close ws-feature' ]]
+
+# One refusal keeps that worktree open and names it, but the rest still go.
+FZF_STUB_PICK=$both WT_STUB_FAIL_PATH=/repo.feature run_remove
+assert_pane 'wt remove failed \(see above\)\. Kept:.* +feature'
+refute_log herdr 'workspace close ws-feature' "$HERDR_STUB_LOG"
+assert_log herdr 'workspace close ws-other' "$HERDR_STUB_LOG"
 
 printf 'remove tests passed\n'
